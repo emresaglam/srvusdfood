@@ -50,17 +50,60 @@ print(parser.schools)
 # → ['Los Cerros Middle', 'Vista Grande Elementary']
 ```
 
-### Return values
+## API Reference
 
-Both `get_full_menu()` and `get_entrees()` follow the same contract:
+### `get_full_menu(school_name, date=None)`
+
+Returns the complete menu for a school on a given date, grouped by category.
+
+```python
+menu = parser.get_full_menu("Los Cerros Middle")
+# {
+#   "entree":    ["Chicken Teriyaki w/ White Rice", "Cheese Pizza", ...],
+#   "fruit":     ["Apples", "Mandarin", ...],
+#   "vegetable": ["Mixed Greens", "Edamame"],
+#   "beverage":  ["1% White Milk", "Nonfat White Milk"],
+#   "condiment": ["Ranch Dressing", ...]   # when present
+# }
+```
 
 | Return | Meaning |
 |---|---|
-| Non-empty result | Menu found |
-| `{}` / `[]` | No menu today (weekend / holiday) |
+| `{"entree": [...], ...}` | Full menu found |
+| `{}` | No menu today (weekend / holiday) |
 | `None` | Network or HTTP error |
 
-Unknown school names raise `ValueError`.
+---
+
+### `get_entrees(school_name, date=None)`
+
+Convenience wrapper — returns only the `"entree"` list from `get_full_menu()`.
+
+```python
+entrees = parser.get_entrees("Los Cerros Middle")
+# ["Chicken Teriyaki w/ White Rice", "Cheese Pizza", ...]
+```
+
+| Return | Meaning |
+|---|---|
+| `["item", ...]` | Entrees found |
+| `[]` | No menu today (weekend / holiday) |
+| `None` | Network or HTTP error |
+
+---
+
+### `format_menu(entrees)`
+
+Formats a list of entree strings into a natural-language sentence.
+
+```python
+parser.format_menu(["Pizza", "Salad", "Fruit"])
+# → "lunch includes Pizza, Salad, and Fruit"
+```
+
+---
+
+Both `get_full_menu()` and `get_entrees()` raise `ValueError` for unrecognised school names.
 
 ## Configuration
 
