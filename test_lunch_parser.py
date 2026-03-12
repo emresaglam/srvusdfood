@@ -35,7 +35,7 @@ def test_unknown_school():
     parser = LunchParser()
     print("\nunknown school raises ValueError")
     try:
-        parser.get_entrees("Hogwarts")
+        parser.get_full_menu("Hogwarts")
         print("  [FAIL] no exception raised")
         return False
     except ValueError as e:
@@ -62,11 +62,49 @@ def test_sanitize():
     return all_passed
 
 
+def test_get_entrees_delegates():
+    """get_entrees() should return the same list as get_full_menu()["entree"]."""
+    parser = LunchParser()
+    date = datetime(2026, 2, 26)
+    print("\nget_entrees() matches get_full_menu()[entree]")
+    menu    = parser.get_full_menu("Los Cerros Middle", date)
+    entrees = parser.get_entrees("Los Cerros Middle", date)
+    expected = (menu or {}).get("entree", [])
+    ok = entrees == expected
+    print(f"  [{'PASS' if ok else 'FAIL'}] {len(entrees)} entree(s)")
+    return ok
+
+
+def test_live_full_menu():
+    parser = LunchParser()
+    date = datetime(2026, 2, 26)  # known school day
+    print(f"\nlive API — full menu for {date.strftime('%Y-%m-%d')}")
+
+    all_ok = True
+    for school in parser.schools:
+        menu = parser.get_full_menu(school, date)
+        if menu is None:
+            print(f"  [ERROR] {school}: API failure")
+            all_ok = False
+            continue
+
+        if not menu:
+            print(f"  [EMPTY] {school}: no menu")
+            continue
+
+        print(f"\n  {school}")
+        for category, items in menu.items():
+            print(f"    {category.upper()}")
+            for item in items:
+                print(f"      - {item}")
+
+    return all_ok
+
+
 def test_live_api():
     parser = LunchParser()
     today = datetime.now()
     print(f"\nlive API — today: {today.strftime('%Y-%m-%d')}")
-    print(f"supported schools: {parser.schools}\n")
 
     all_ok = True
     for school in parser.schools:
@@ -77,10 +115,7 @@ def test_live_api():
         elif not entrees:
             print(f"  [EMPTY] {school}: no menu today (weekend/holiday?)")
         else:
-            print(f"  [OK]    {school}: {len(entrees)} entree(s)")
-            for e in entrees:
-                print(f"            - {e}")
-            print(f"          → {parser.format_menu(entrees)}")
+            print(f"  [OK]    {school}: {parser.format_menu(entrees)}")
     return all_ok
 
 
@@ -89,6 +124,8 @@ if __name__ == "__main__":
         test_format_menu(),
         test_unknown_school(),
         test_sanitize(),
+        test_get_entrees_delegates(),
+        test_live_full_menu(),
         test_live_api(),
     ]
     print(f"\n{'='*50}")

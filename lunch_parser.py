@@ -8,6 +8,12 @@ Usage:
     from lunch_parser import LunchParser
 
     parser = LunchParser()
+
+    # Full menu grouped by category
+    menu = parser.get_full_menu("Los Cerros Middle")
+    # → {"entree": [...], "beverage": [...], "fruit": [...], "vegetable": [...]}
+
+    # Entrees only (convenience wrapper)
     entrees = parser.get_entrees("Los Cerros Middle")
     print(parser.format_menu(entrees))
 """
@@ -35,23 +41,20 @@ class LunchParser:
     """
     Fetches and formats school lunch menus from the Nutrislice API.
 
-    Supports case-insensitive school name lookup and returns entrees
-    as a plain list of strings, leaving formatting up to the caller.
+    Primary method:
+        get_full_menu()  → Dict[str, List[str]]  category → item names
+                         → {}                     no menu today
+                         → None                   network / HTTP error
 
-    Returns:
-        get_entrees() → List[str]  — entrees for the day
-                      → []         — day exists but has no menu
-                      → None       — network / HTTP error
-
-    Raises:
-        ValueError from get_entrees() if the school name is not recognised.
+    Convenience wrapper:
+        get_entrees()    → same contract, but only the "entree" category
     """
 
     API_TIMEOUT = 8  # seconds
 
     # Mapping: normalised name → (display name, Nutrislice API slug)
     SCHOOL_MAPPING: Dict[str, Tuple[str, str]] = {
-        "los cerros middle":      ("Los Cerros Middle",      "los-cerros-middle"),
+        "los cerros middle":       ("Los Cerros Middle",       "los-cerros-middle"),
         "vista grande elementary": ("Vista Grande Elementary", "vista-grande-school"),
     }
 
@@ -73,18 +76,20 @@ class LunchParser:
         """Display names of all supported schools."""
         return [display for display, _ in self.SCHOOL_MAPPING.values()]
 
-    def get_entrees(
+    def get_full_menu(
         self, school_name: str, date: datetime = None
-    ) -> Optional[List[str]]:
+    ) -> Optional[Dict[str, List[str]]]:
         """
-        Fetch entrees for a school on a given date.
+        Fetch the complete menu for a school on a given date, grouped by category.
 
         Args:
             school_name: Case-insensitive school name, e.g. "Los Cerros Middle".
             date:        Date to fetch (defaults to today).
 
         Returns:
-            List of sanitised entree name strings — may be empty if no menu.
+            Dict with category keys ("entree", "beverage", "fruit", "vegetable", ...)
+            each mapping to a sanitised list of item names.
+            Empty dict if the day exists but has no menu (weekend / holiday).
             None if the API call failed.
 
         Raises:
@@ -103,16 +108,38 @@ class LunchParser:
         display_name, school_slug = self.SCHOOL_MAPPING[school_key]
         logger.info(f"Fetching menu: {display_name} on {date.strftime('%Y-%m-%d')}")
 
-        return self._fetch_entrees(school_slug, date)
+        data = self._fetch(school_slug, date)
+        if data is None:
+            return None
+
+        return self._parse_day(data, date.strftime("%Y-%m-%d"))
+
+    def get_entrees(
+        self, school_name: str, date: datetime = None
+    ) -> Optional[List[str]]:
+        """
+        Fetch entrees only. Convenience wrapper around get_full_menu().
+
+        Returns:
+            List of entree name strings — may be empty if no menu.
+            None if the API call failed.
+
+        Raises:
+            ValueError: If school_name is not in SCHOOL_MAPPING.
+        """
+        menu = self.get_full_menu(school_name, date)
+        if menu is None:
+            return None
+        return menu.get("entree", [])
 
     def format_menu(self, entrees: List[str]) -> str:
         """
         Format a list of entrees into a natural-language string.
 
         Examples:
-            []                        → "no menu available"
-            ["Pizza"]                 → "lunch is Pizza"
-            ["Pizza", "Salad"]        → "lunch includes Pizza and Salad"
+            []                          → "no menu available"
+            ["Pizza"]                   → "lunch is Pizza"
+            ["Pizza", "Salad"]          → "lunch includes Pizza and Salad"
             ["Pizza", "Salad", "Fruit"] → "lunch includes Pizza, Salad, and Fruit"
         """
         if not entrees:
@@ -126,11 +153,8 @@ class LunchParser:
 
     # ── Private helpers ───────────────────────────────────────────────────────
 
-    def _fetch_entrees(
-        self, school_slug: str, date: datetime
-    ) -> Optional[List[str]]:
-        """Hit the Nutrislice API and return entrees for the given date."""
-        date_str = date.strftime("%Y-%m-%d")
+    def _fetch(self, school_slug: str, date: datetime) -> Optional[dict]:
+        """Fetch the raw API response. Returns None on any network/HTTP error."""
         url = (
             f"https://{self.district}.api.nutrislice.com/menu/api/weeks/"
             f"school/{school_slug}/menu-type/lunch/"
@@ -141,7 +165,7 @@ class LunchParser:
         try:
             with urlopen(url, timeout=self.API_TIMEOUT) as response:
                 logger.debug(f"HTTP {response.getcode()}")
-                data = json.loads(response.read().decode("utf-8"))
+                return json.loads(response.read().decode("utf-8"))
         except socket.timeout:
             logger.error(f"Request timed out: {url}")
             return None
@@ -152,16 +176,17 @@ class LunchParser:
             logger.error(f"Network error: {e.reason}")
             return None
 
-        return self._extract_entrees(data, date_str)
-
-    def _extract_entrees(self, data: dict, date_str: str) -> List[str]:
-        """Parse the Nutrislice JSON payload and return entrees for date_str."""
+    def _parse_day(self, data: dict, date_str: str) -> Dict[str, List[str]]:
+        """
+        Find date_str in the API payload and return all items grouped by category.
+        Returns {} if the date isn't present or has no items.
+        """
         for day in data.get("days", []):
             logger.debug(f"Checking day: {day.get('date')}")
             if day.get("date") != date_str:
                 continue
 
-            entrees = []
+            menu: Dict[str, List[str]] = {}
             for item in day.get("menu_items", []):
                 food = item.get("food")
                 if not food:
@@ -169,14 +194,15 @@ class LunchParser:
                 name     = food.get("name", "")
                 category = food.get("food_category", "")
                 logger.debug(f"  {category}: {name}")
-                if category == "entree" and name:
-                    entrees.append(self._sanitize(name))
+                if name and category:
+                    menu.setdefault(category, []).append(self._sanitize(name))
 
-            logger.info(f"Found {len(entrees)} entree(s) for {date_str}")
-            return entrees
+            summary = ", ".join(f"{c}={len(v)}" for c, v in menu.items())
+            logger.info(f"Menu for {date_str}: {summary or 'empty'}")
+            return menu
 
         logger.warning(f"Date {date_str} not found in API response")
-        return []
+        return {}
 
     @staticmethod
     def _sanitize(text: str) -> str:

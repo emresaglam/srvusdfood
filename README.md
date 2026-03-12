@@ -24,31 +24,40 @@ alexa-lunch/
 
 ```python
 from lunch_parser import LunchParser
+from datetime import datetime
 
 parser = LunchParser()
 
-# Get today's entrees
+# Full menu grouped by category (entree, beverage, fruit, vegetable, ...)
+menu = parser.get_full_menu("Los Cerros Middle")
+for category, items in menu.items():
+    print(f"{category.upper()}: {', '.join(items)}")
+# ENTREE: Chicken Teriyaki w/ White Rice, Cheese Pizza, ...
+# FRUIT: Apples, Mandarin, ...
+# VEGETABLE: Mixed Greens, Edamame
+# BEVERAGE: 1% White Milk, Nonfat White Milk
+
+# Entrees only
 entrees = parser.get_entrees("Los Cerros Middle")
-
-# Get entrees for a specific date
-from datetime import datetime
-entrees = parser.get_entrees("Vista Grande Elementary", datetime(2026, 2, 26))
-
-# Format as a natural-language string
 print(parser.format_menu(entrees))
 # → "lunch includes Chicken Teriyaki w/ White Rice, Cheese Pizza, and Mac Salad"
+
+# Specific date
+menu = parser.get_full_menu("Vista Grande Elementary", datetime(2026, 2, 26))
 
 # List supported schools
 print(parser.schools)
 # → ['Los Cerros Middle', 'Vista Grande Elementary']
 ```
 
-### Return values for `get_entrees()`
+### Return values
+
+Both `get_full_menu()` and `get_entrees()` follow the same contract:
 
 | Return | Meaning |
 |---|---|
-| `["Pizza", "Salad", ...]` | Entrees found |
-| `[]` | No menu today (weekend / holiday) |
+| Non-empty result | Menu found |
+| `{}` / `[]` | No menu today (weekend / holiday) |
 | `None` | Network or HTTP error |
 
 Unknown school names raise `ValueError`.
